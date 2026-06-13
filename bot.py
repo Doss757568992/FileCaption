@@ -20,6 +20,27 @@ REPLACE_RULES = {}
 # Global queue for handling 100+ files safely
 message_queue = asyncio.Queue()
 
+# --- HELPER FUNCTION TO PREVENT ENTITY ERRORS ---
+def convert_markdown_to_html(text: str) -> str:
+    """
+    User template-la ulla **bold** markdown text-ai safe-ana HTML tags-ga
+    maathuthu, filename-la ulla extra characters-al error varama thadukum.
+    """
+    if not text:
+        return ""
+    
+    # Simple Markdown text conversion logic
+    if "**" in text:
+        parts = text.split("**")
+        html_text = ""
+        for idx, part in enumerate(parts):
+            if idx % 2 == 1:
+                html_text += f"<b>{part}</b>"
+            else:
+                html_text += part
+        return html_text
+    return text
+
 # --- KOYEB HEALTH CHECK SERVER ---
 app = Flask('')
 
@@ -62,7 +83,6 @@ async def set_replace(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Usage: `/setreplace old1|new1, old2|new2`")
         return
     
-    # Comma-vai vachu split seithu multiple rules-ai edukum
     pairs = raw_text[1].split(",")
     new_rules = {}
     for pair in pairs:
@@ -136,7 +156,6 @@ async def queue_worker():
                 file_name = ".".join(file_name.split(".")[:-1])
 
             # MULTI-REPLACE/REMOVE LOGIC
-            # Save panna ella rules-aiyum varisaiyaga file name-il apply pannum
             if file_name and REPLACE_RULES:
                 for target_text, replacement in REPLACE_RULES.items():
                     if target_text in file_name:
@@ -146,7 +165,11 @@ async def queue_worker():
             if "{filename}" in final_caption:
                 final_caption = final_caption.replace("{filename}", file_name.strip() if file_name else "File")
 
-            await message.edit_caption(caption=final_caption, parse_mode="Markdown")
+            # Markdown asterisks-ai HTML format-guku convert seigirom
+            final_caption = convert_markdown_to_html(final_caption)
+
+            # parse_mode HTML-aga maathiyathaal filename-la ulla brackets-al error varathu
+            await message.edit_caption(caption=final_caption, parse_mode="HTML")
             await asyncio.sleep(3.5) # Anti-flood delay for 100+ files
             
         except Exception as e:
