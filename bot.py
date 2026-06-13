@@ -13,8 +13,9 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789")) 
 
 CUSTOM_CAPTION = "🎬 **File Name:** {filename}\n\n✨ **Join our main channel for more updates!** ✨"
-FIND_TEXT = ""
-REPLACE_TEXT = ""
+
+# Inga multiple rules list-aga save aagum
+REPLACE_RULES = {} 
 
 # Global queue for handling 100+ files safely
 message_queue = asyncio.Queue()
@@ -34,11 +35,12 @@ def run_flask():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     await update.message.reply_text(
-        "👋 **Welcome to Auto Caption Bot (Ultra 100+ Bulk Version)!**\n\n"
+        "👋 **Welcome to Multi-Replace Auto Caption Bot!**\n\n"
         "**Commands:**\n"
-        "➡ `/setcaption <text>` - New caption layout set seiya (Use `{filename}`)\n"
-        "➡ `/setreplace <find> | <replace>` - File name-kul ulla text-ai replace seiya\n"
-        "➡ `/setremove <text>` - File name-kul ulla text-ai remove seiya\n"
+        "➡ `/setcaption <text>` - New caption layout (Use `{filename}`)\n"
+        "➡ `/setreplace old1|new1, old2|new2` - Multiple text replace seiya\n"
+        "➡ `/setremove old1, old2, old3` - Multiple text-ai remove seiya\n"
+        "➡ `/clear` - Replace rules anaithaiyum azhika\n"
         "➡ `/status` - Current settings-ai parka"
     )
 
@@ -53,39 +55,73 @@ async def set_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ **New Caption Layout Set:**\n\n{CUSTOM_CAPTION}")
 
 async def set_replace(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global FIND_TEXT, REPLACE_TEXT
+    global REPLACE_RULES
     if update.effective_user.id != ADMIN_ID: return
-    text = " ".join(context.args)
-    if "|" not in text:
-        await update.message.reply_text("❌ Usage: `/setreplace old | new`")
+    raw_text = update.message.text.split(None, 1)
+    if len(raw_text) < 2:
+        await update.message.reply_text("❌ Usage: `/setreplace old1|new1, old2|new2`")
         return
-    parts = text.split("|")
-    FIND_TEXT = parts[0].strip()
-    REPLACE_TEXT = parts[1].strip()
-    await update.message.reply_text(f"✅ **File Name Replace Set:**\n🔍 Find: `{FIND_TEXT}`\n🔄 Replace: `{REPLACE_TEXT}`")
+    
+    # Comma-vai vachu split seithu multiple rules-ai edukum
+    pairs = raw_text[1].split(",")
+    new_rules = {}
+    for pair in pairs:
+        if "|" in pair:
+            parts = pair.split("|")
+            new_rules[parts[0].strip()] = parts[1].strip()
+            
+    REPLACE_RULES.update(new_rules)
+    
+    msg = "✅ **Added Replace Rules:**\n"
+    for k, v in new_rules.items():
+        msg += f"🔍 `{k}` ➡ 🔄 `{v}`\n"
+    await update.message.reply_text(msg)
 
 async def set_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global FIND_TEXT, REPLACE_TEXT
+    global REPLACE_RULES
     if update.effective_user.id != ADMIN_ID: return
-    if not context.args:
-        await update.message.reply_text("❌ Usage: `/setremove text`")
+    raw_text = update.message.text.split(None, 1)
+    if len(raw_text) < 2:
+        await update.message.reply_text("❌ Usage: `/setremove old1, old2, old3`")
         return
-    FIND_TEXT = " ".join(context.args)
-    REPLACE_TEXT = ""
-    await update.message.reply_text(f"✅ **File Name Remove Set:** `{FIND_TEXT}`")
+    
+    items = raw_text[1].split(",")
+    new_rules = {}
+    for item in items:
+        if item.strip():
+            new_rules[item.strip()] = ""
+            
+    REPLACE_RULES.update(new_rules)
+    
+    msg = "✅ **Added Remove Rules:**\n"
+    for k in new_rules.keys():
+        msg += f"❌ Removed: `{k}`\n"
+    await update.message.reply_text(msg)
+
+async def clear_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global REPLACE_RULES
+    if update.effective_user.id != ADMIN_ID: return
+    REPLACE_RULES = {}
+    await update.message.reply_text("🗑️ **All replace and remove rules cleared!**")
 
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
+    rules_text = ""
+    if REPLACE_RULES:
+        for k, v in REPLACE_RULES.items():
+            rules_text += f"• `{k}` ➡ `{v if v else '[REMOVE]'}`\n"
+    else:
+        rules_text = "None"
+        
     status_msg = (
         f"⚙ **Current Bot Settings:**\n\n"
         f"📝 **Caption Layout:**\n{CUSTOM_CAPTION}\n\n"
-        f"🔍 **File Name Find:** `{FIND_TEXT if FIND_TEXT else 'None'}`\n"
-        f"🔄 **File Name Replace/Remove:** `{REPLACE_TEXT if FIND_TEXT else 'None'}`\n\n"
-        f"⚡️ *Queue Status: Handling massive bulk entries safely.*"
+        f"🔄 **Active Replace/Remove Rules:**\n{rules_text}\n\n"
+        f"⚡️ *Queue Status: Bulk handling activated.*"
     )
     await update.message.reply_text(status_msg)
 
-# --- ADVANCED QUEUE WORKER (Handles 100+ Files without Skipping) ---
+# --- ADVANCED QUEUE WORKER ---
 async def queue_worker():
     while True:
         message = await message_queue.get()
@@ -99,23 +135,22 @@ async def queue_worker():
             if file_name and "." in file_name:
                 file_name = ".".join(file_name.split(".")[:-1])
 
-            # File Name Replace/Remove Logic
-            if file_name and FIND_TEXT and (FIND_TEXT in file_name):
-                file_name = file_name.replace(FIND_TEXT, REPLACE_TEXT)
+            # MULTI-REPLACE/REMOVE LOGIC
+            # Save panna ella rules-aiyum varisaiyaga file name-il apply pannum
+            if file_name and REPLACE_RULES:
+                for target_text, replacement in REPLACE_RULES.items():
+                    if target_text in file_name:
+                        file_name = file_name.replace(target_text, replacement)
 
             final_caption = CUSTOM_CAPTION
             if "{filename}" in final_caption:
-                final_caption = final_caption.replace("{filename}", file_name if file_name else "File")
+                final_caption = final_caption.replace("{filename}", file_name.strip() if file_name else "File")
 
-            # Telegram server block aagama iruka steady line edit
             await message.edit_caption(caption=final_caption, parse_mode="Markdown")
-            
-            # Massive files-guku continuous 3.5 seconds loop gap adiyatha maari pathukum
-            await asyncio.sleep(3.5)
+            await asyncio.sleep(3.5) # Anti-flood delay for 100+ files
             
         except Exception as e:
             logging.error(f"Error in queue worker: {e}")
-            # Flood wait control block vantha extra cooldown time
             if "Flood control exceeded" in str(e) or "RetryAfter" in str(e):
                 await asyncio.sleep(20)
         finally:
@@ -127,7 +162,6 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not message: return
     
     if message.photo or message.video or message.document:
-        # 100 files vanthalum sariya task queue-la save aagidum
         await message_queue.put(message)
 
 def main():
@@ -144,14 +178,14 @@ def main():
     application.add_handler(CommandHandler("setcaption", set_caption))
     application.add_handler(CommandHandler("setreplace", set_replace))
     application.add_handler(CommandHandler("setremove", set_remove))
+    application.add_handler(CommandHandler("clear", clear_rules))
     application.add_handler(CommandHandler("status", show_status))
     application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_channel_post))
 
-    # Background infinite loop start
     loop = asyncio.get_event_loop()
     loop.create_task(queue_worker())
 
-    print("Koyeb High-Performance Bot is running...")
+    print("Koyeb Multi-Replace Bot is running...")
     application.run_polling()
 
 if __name__ == '__main__':
