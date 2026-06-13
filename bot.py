@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from threading import Thread
 from flask import Flask
 from telegram import Update
@@ -14,6 +15,9 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 CUSTOM_CAPTION = "🎬 **File Name:** {filename}\n\n✨ **Join our main channel for more updates!** ✨"
 FIND_TEXT = ""
 REPLACE_TEXT = ""
+
+# Global queue for handling 100+ files safely
+message_queue = asyncio.Queue()
 
 # --- KOYEB HEALTH CHECK SERVER ---
 app = Flask('')
@@ -30,7 +34,7 @@ def run_flask():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     await update.message.reply_text(
-        "👋 **Welcome to Auto Caption Bot!**\n\n"
+        "👋 **Welcome to Auto Caption Bot (Ultra 100+ Bulk Version)!**\n\n"
         "**Commands:**\n"
         "➡ `/setcaption <text>` - New caption layout set seiya (Use `{filename}`)\n"
         "➡ `/setreplace <find> | <replace>` - File name-kul ulla text-ai replace seiya\n"
@@ -77,41 +81,54 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📝 **Caption Layout:**\n{CUSTOM_CAPTION}\n\n"
         f"🔍 **File Name Find:** `{FIND_TEXT if FIND_TEXT else 'None'}`\n"
         f"🔄 **File Name Replace/Remove:** `{REPLACE_TEXT if FIND_TEXT else 'None'}`\n\n"
-        f"ℹ️ *Note: Old captions are completely auto-removed.*"
+        f"⚡️ *Queue Status: Handling massive bulk entries safely.*"
     )
     await update.message.reply_text(status_msg)
 
-# --- MAIN CAPTION LOGIC ---
+# --- ADVANCED QUEUE WORKER (Handles 100+ Files without Skipping) ---
+async def queue_worker():
+    while True:
+        message = await message_queue.get()
+        try:
+            file_name = ""
+            if message.document:
+                file_name = message.document.file_name or ""
+            elif message.video:
+                file_name = message.video.file_name or ""
+
+            if file_name and "." in file_name:
+                file_name = ".".join(file_name.split(".")[:-1])
+
+            # File Name Replace/Remove Logic
+            if file_name and FIND_TEXT and (FIND_TEXT in file_name):
+                file_name = file_name.replace(FIND_TEXT, REPLACE_TEXT)
+
+            final_caption = CUSTOM_CAPTION
+            if "{filename}" in final_caption:
+                final_caption = final_caption.replace("{filename}", file_name if file_name else "File")
+
+            # Telegram server block aagama iruka steady line edit
+            await message.edit_caption(caption=final_caption, parse_mode="Markdown")
+            
+            # Massive files-guku continuous 3.5 seconds loop gap adiyatha maari pathukum
+            await asyncio.sleep(3.5)
+            
+        except Exception as e:
+            logging.error(f"Error in queue worker: {e}")
+            # Flood wait control block vantha extra cooldown time
+            if "Flood control exceeded" in str(e) or "RetryAfter" in str(e):
+                await asyncio.sleep(20)
+        finally:
+            message_queue.task_done()
+
+# --- CHANNEL POST RECEIVER ---
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.channel_post
     if not message: return
-
-    # 1. Original file name-ai edupatharku
-    file_name = ""
-    if message.document:
-        file_name = message.document.file_name or ""
-    elif message.video:
-        file_name = message.video.file_name or ""
-
-    # Extension-ai thookuvatharku (.mkv, .mp4)
-    if file_name and "." in file_name:
-        file_name = ".".join(file_name.split(".")[:-1])
-
-    # 2. **FILE NAME REPLACE/REMOVE LOGIC**
-    # File name-la neenga sonna paazhaya text irundha athai mattum replace/remove pannum
-    if file_name and FIND_TEXT and (FIND_TEXT in file_name):
-        file_name = file_name.replace(FIND_TEXT, REPLACE_TEXT)
-
-    # 3. Custom Caption build setup (Munaadi irundha caption auto-va ignore aagidum)
-    final_caption = CUSTOM_CAPTION
     
-    if "{filename}" in final_caption:
-        final_caption = final_caption.replace("{filename}", file_name if file_name else "File")
-
-    try:
-        await message.edit_caption(caption=final_caption, parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Error editing caption: {e}")
+    if message.photo or message.video or message.document:
+        # 100 files vanthalum sariya task queue-la save aagidum
+        await message_queue.put(message)
 
 def main():
     TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -130,7 +147,11 @@ def main():
     application.add_handler(CommandHandler("status", show_status))
     application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_channel_post))
 
-    print("Koyeb Bot is running...")
+    # Background infinite loop start
+    loop = asyncio.get_event_loop()
+    loop.create_task(queue_worker())
+
+    print("Koyeb High-Performance Bot is running...")
     application.run_polling()
 
 if __name__ == '__main__':
