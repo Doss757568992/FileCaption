@@ -11,9 +11,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 # --- CONFIGURATION ---
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789")) 
 
-CUSTOM_CAPTION = "✨ **Join our main channel for more updates!** ✨"
-FIND_TEXT = ""
-REPLACE_TEXT = ""
+# Default initial caption
+CUSTOM_CAPTION = "🎬 **File Name:** {filename}\n\n✨ **Join our main channel for more updates!** ✨"
 
 # --- KOYEB HEALTH CHECK SERVER ---
 app = Flask('')
@@ -32,10 +31,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 **Welcome to Auto Caption Bot!**\n\n"
         "**Commands:**\n"
-        "➡ `/setcaption <text>` - New caption set seiya (Use `{filename}` for file name)\n"
-        "➡ `/setreplace <find> | <replace>` - Text-ai replace seiya\n"
-        "➡ `/setremove <text>` - Oru text-ai remove seiya\n"
-        "➡ `/status` - Current settings-ai parka"
+        "➡ `/setcaption <text>` - Paazhaya caption-ai azhithu puthiya caption set seiya (Use `{filename}` for file name)\n"
+        "➡ `/status` - Current caption settings-ai parka"
     )
 
 async def set_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,81 +41,47 @@ async def set_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("❌ Usage: `/setcaption text`")
         return
-    # Message text-il irundhu command-ai mattum thookittu full caption-ai line breaks kooda edukum
+    
+    # Full message-il irundhu line breaks kooda exact-ah caption-ai edukum
     raw_text = update.message.text
     CUSTOM_CAPTION = raw_text.split(None, 1)[1]
-    await update.message.reply_text(f"✅ **New Caption Set:**\n\n{CUSTOM_CAPTION}")
-
-async def set_replace(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global FIND_TEXT, REPLACE_TEXT
-    if update.effective_user.id != ADMIN_ID: return
-    text = " ".join(context.args)
-    if "|" not in text:
-        await update.message.reply_text("❌ Usage: `/setreplace old | new`")
-        return
-    parts = text.split("|")
-    FIND_TEXT = parts[0].strip()
-    REPLACE_TEXT = parts[1].strip()
-    await update.message.reply_text(f"✅ **Find & Replace Set:**\n🔍 Find: `{FIND_TEXT}`\n🔄 Replace: `{REPLACE_TEXT}`")
-
-async def set_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global FIND_TEXT, REPLACE_TEXT
-    if update.effective_user.id != ADMIN_ID: return
-    if not context.args:
-        await update.message.reply_text("❌ Usage: `/setremove text`")
-        return
-    FIND_TEXT = " ".join(context.args)
-    REPLACE_TEXT = ""
-    await update.message.reply_text(f"✅ **Text to Remove Set:** `{FIND_TEXT}`")
+    await update.message.reply_text(f"✅ **Puthiya Caption Set Seiyapattathu!**\n\n{CUSTOM_CAPTION}")
 
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     status_msg = (
         f"⚙ **Current Bot Settings:**\n\n"
-        f"📝 **Caption:**\n{CUSTOM_CAPTION}\n\n"
-        f"🔍 **Find Text:** `{FIND_TEXT if FIND_TEXT else 'None'}`\n"
-        f"🔄 **Replace/Remove Text:** `{REPLACE_TEXT if FIND_TEXT else 'None'}`"
+        f"📝 **Your Active Caption:**\n{CUSTOM_CAPTION}\n\n"
+        f"ℹ️ *Note: Paazhaya captions automatically remove aagividum!*"
     )
     await update.message.reply_text(status_msg)
 
-# --- MAIN CAPTION LOGIC ---
+# --- MAIN CAPTION LOGIC (AUTO REMOVE & REPLACE) ---
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.channel_post
     if not message: return
 
-    # File name edukuratha check seiya
+    # 1. File name-ai properly edupathaarku
     file_name = ""
     if message.document:
         file_name = message.document.file_name or ""
     elif message.video:
         file_name = message.video.file_name or ""
 
-    # .mkv, .mp4 extension-ai remove seiya (if exists)
+    # .mkv, .mp4 pondra extensions-ai remove seiya
     if file_name and "." in file_name:
         file_name = ".".join(file_name.split(".")[:-1])
 
-    original_caption = message.caption or ""
+    # 2. Paazhaya caption-ai muzhuvathaga puram thalliittu, puthiya caption-ai ready seigirathu
+    final_caption = CUSTOM_CAPTION
     
-    # 1. First Find and Replace/Remove process-ai seiyum
-    if FIND_TEXT and (FIND_TEXT in original_caption):
-        working_caption = original_caption.replace(FIND_TEXT, REPLACE_TEXT)
-    else:
-        working_caption = original_caption
-
-    # 2. Custom Caption logic with {filename} variable replacement
-    current_custom = CUSTOM_CAPTION
-    if "{filename}" in current_custom:
-        current_custom = current_custom.replace("{filename}", file_name if file_name else "File")
-
-    # 3. Line breaks properly maintain panni combine seiyum
-    if working_caption:
-        # Paazhaya caption-gukum puthiya caption-gukum naduvil clear gap vizhum
-        final_caption = f"{working_caption}\n\n{current_custom}"
-    else:
-        final_caption = current_custom
+    # 3. `{filename}` keyword irundhal athai original file name kooda replace seiyum
+    if "{filename}" in final_caption:
+        final_caption = final_caption.replace("{filename}", file_name if file_name else "File")
 
     try:
-        await message.edit_caption(caption=final_caption)
+        # Inga paazhaya caption-guku velaiyillai, fresh formatted caption mattum update aagum
+        await message.edit_caption(caption=final_caption, parse_mode="Markdown")
     except Exception as e:
         logging.error(f"Error editing caption: {e}")
 
@@ -134,8 +97,6 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setcaption", set_caption))
-    application.add_handler(CommandHandler("setreplace", set_replace))
-    application.add_handler(CommandHandler("setremove", set_remove))
     application.add_handler(CommandHandler("status", show_status))
     application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_channel_post))
 
